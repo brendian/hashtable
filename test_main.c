@@ -1,6 +1,4 @@
-#include <stdio.h>
-
-#include "Unity-2.7.0/src/unity.h"
+#include "unity.h"
 #include "hashtable.h"
 
 void setUp(void) {}
