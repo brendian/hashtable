@@ -5,37 +5,30 @@
 int main() {
 
     
-    HashTable *hash_table = hash_table_create(HASH_TYPE_STRING, HASH_TYPE_INT);
+    HashTable *hash_table = hash_table_create(HASH_TYPE_STRING, HASH_TYPE_STRING);
     if (hash_table == NULL) {
         printf("hash_table null\n");
     }
+    char *name1 = "Brendan";
+    char *val1 = "The Best";
+    char *name2 = "Tyler";
+    char *val2 = "Smith";
+    char *name3 = "John";
+    char *val3 = "Slade";
     printf("Created hash table\n");
     printf("Set fn ptrs\n");
-    char* name1 = malloc(sizeof(char) * 8);
-    strcpy(name1, "Brendan");
-    int* age1 = malloc(sizeof(int));
-    *age1 = 33;
-    char* name2 = malloc(sizeof(char) * 6);
-    strcpy(name2, "Tyler");
-    int* age2 = malloc(sizeof(int));
-    *age2 = 32;
-    char* name3 = malloc(sizeof(char) * 8);
-    strcpy(name3, "Brendan");
-    int* age3 = malloc(sizeof(int));
-    *age3 = 35;
+    
     printf("Data generated/allocated\n");
-    hash_table_put(hash_table, (void*)name1, (void*)age1);
-    hash_table_put(hash_table, (void*)name2, (void*)age2);
-    hash_table_put(hash_table, (void*)name3, (void*)age3);
+    hash_table_put(hash_table, (void*)name1, (void*)val1);
+    hash_table_put(hash_table, (void*)name2, (void*)val2);
+    hash_table_put(hash_table, (void*)name3, (void*)val3);
 
-    print(hash_table);
     printf("data added to hashtable\n");
-    void* age1_hashed = hash_table_get(hash_table, (void*)name1);
-    printf("Age 1 retrieved: %d\n", *(int*)age1_hashed);
-    int result = hash_table_remove(hash_table, (void*)name1);
-    void* age1_removed = hash_table_get(hash_table, (void*)name1);
-    if (age1_removed == NULL) {
-        printf("removal successful\n");
-    }
+    void* val1_hashed = hash_table_get(hash_table, (void*)name1);
+    printf("Val1 retrieved: %s\n", (char*)val1_hashed);
+    hash_table_resize(hash_table);
+    printf("Resized.\n");
+    void* val2_hashed_resized = hash_table_get(hash_table, (void*)name1);
+    printf("Val2 retrieved: %s\n", (char*)val2_hashed_resized);
     return 0;
 }
