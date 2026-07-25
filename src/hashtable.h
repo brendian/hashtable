@@ -51,6 +51,7 @@ HashTable* hash_table_create(int key_type, int value_type);
 HashTableResult hash_table_put(HashTable* hash_table, void* key, void* value);
 void* hash_table_get(HashTable* hash_table, void* key);
 HashTableResult hash_table_remove(HashTable* hash_table, void* key);
+bool hash_table_key_exists(HashTable* hash_table, void* key);
 
 void hash_table_destroy(HashTable* hash_table);
 void ht_print(HashTable* hash_table);

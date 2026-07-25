@@ -25,7 +25,6 @@ static void hash_table_downsize(HashTable* hash_table);
 
 static HashTableResult remove_kvp(HashTable* hash_table, void* key);
 
-
 HashTable* hash_table_create(int key_type, int value_type) {
         HashTable* hash_table = malloc(sizeof(HashTable));
         if (!hash_table) {
@@ -186,6 +185,14 @@ HashTableResult hash_table_remove(HashTable* hash_table, void* key) {
         return result;
 }
 
+bool hash_table_key_exists(HashTable* hash_table, void* key) {
+       void* result = hash_table_get(hash_table, key); 
+       if (!result) {
+           return false;
+       }
+       return true;
+}
+
 static HashTableResult remove_kvp(HashTable* hash_table, void* key) {
         uint64_t hash_value = hash_table->hash_func(key);
         uint64_t hash_idx = hash_value % hash_table->size;
@@ -250,7 +257,7 @@ static HashTableResult rehash_for_resize(HashTable* hash_table,
 }
 
 void hash_table_resize_test(HashTable* hash_table) {
-    hash_table_resize(hash_table);
+        hash_table_resize(hash_table);
 }
 
 static void hash_table_resize(HashTable* hash_table) {
@@ -307,8 +314,6 @@ static void hash_table_downsize(HashTable* hash_table) {
         hash_table->is_downsizing = false;
 }
 
-
-
 static bool key_compare(const void* key1, const void* key2, int key_type) {
         bool key_match;
         key_match = false;
@@ -345,7 +350,6 @@ static void entry_destructor(HashEntry* entry) {
         value_destructor(entry->value);
         free(entry);
 }
-
 
 void hash_table_destroy(HashTable* hash_table) {
         for (size_t bucket_counter = 0; bucket_counter < hash_table->size;
