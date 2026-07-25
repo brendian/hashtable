@@ -112,7 +112,7 @@ int hash_table_put(HashTable* hash_table, void* key, void* value) {
                         if (bucket_was_empty) {
                                 hash_table->used_bucket_count--;
                         }
-                        return -1;
+                        return HT_ERR_ALLOC_FAILED;
                 }
                 hash_entry->key = key;
                 hash_entry->value = value;
@@ -121,12 +121,12 @@ int hash_table_put(HashTable* hash_table, void* key, void* value) {
         }
 
         if ((float)hash_table->used_bucket_count / (float)hash_table->size >
-                0.7f ||
+                HT_FILL_RATIO ||
             chain_collisions_exceed_max) {
                 hash_table_resize(hash_table);
         }
 
-        return 1;
+        return HT_OK;
 }
 
 void* hash_table_get(HashTable* hash_table, void* key) {
@@ -214,7 +214,7 @@ int hash_table_remove(HashTable* hash_table, void* key) {
         HashEntry* target = hash_table->buckets[hash_idx];
 
         if (target == NULL) {
-                return 0;
+                return HT_ERR_KEY_NOT_FOUND;
         }
 
         if (key_compare(target->key, key, hash_table->hash_key_type) == 1) {
@@ -235,13 +235,30 @@ int hash_table_remove(HashTable* hash_table, void* key) {
                         value_destructor(target->value);
                         free(target);
                         previous->next = next_node;
-                        return 1;
+                        return HT_OK;
                 }
                 previous = target;
                 target = target->next;
         }
 
-        return -1;
+        return HT_ERR_KEY_NOT_FOUND;
+}
+
+void hash_table_destroy(HashTable* hash_table) {
+        for (size_t bucket_counter = 0; bucket_counter < hash_table->size;
+             bucket_counter++) {
+            HashEntry *bucket_entry = hash_table->buckets[bucket_counter];
+            while (bucket_entry != NULL) {
+                HashEntry *next_entry = bucket_entry->next;
+                key_destructor(bucket_entry->key);
+                value_destructor(bucket_entry->value);
+                free(bucket_entry);
+                bucket_entry = next_entry;
+            }
+        }
+        free(hash_table->buckets);
+        // bye bye
+        free(hash_table);
 }
 
 void ht_print(HashTable* hash_table) {

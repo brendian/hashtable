@@ -5,6 +5,7 @@
 
 #define TABLE_SIZE 1000
 #define MAX_CHAIN_LENGTH 5
+#define HT_FILL_RATIO 0.7f
 
 #define HASH_TYPE_INT 1
 #define HASH_TYPE_STRING 2
@@ -35,6 +36,13 @@ typedef struct HashTable {
         void (*value_destructor)(void* value);
 } HashTable;
 
+typedef enum {
+    HT_OK = 0,
+    HT_ERR_ALLOC_FAILED,
+    HT_ERR_KEY_NOT_FOUND,
+    HT_ERR_INVALID_TYPE,
+} HashTableResult;
+
 uint64_t hash_int(const void* key);
 uint64_t hash_string(const void* key_str);
 uint64_t hash_ptr(const void* key_ptr);
@@ -53,6 +61,7 @@ void* hash_table_get(HashTable* hash_table, void* key);
 int key_value_compare(HashEntry* hash_entry, void* key, void* value,
                       int key_type, int value_type);
 void hash_table_resize(HashTable* hash_table);
+void hash_table_destroy(HashTable* hash_table);
 // removes an item from the hash table.
 // if the value attempting to remove doesnt exist (NULL), return 0.
 // if it does exist and was successfully removed, return 1;
