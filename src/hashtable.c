@@ -2,35 +2,29 @@
 
 #include <stddef.h>
 
-uint64_t hash_int(const void* key) {
-        uint64_t hash = *(uint64_t*)(uintptr_t)key;
+/*** Hashing Functions ***/
+static uint64_t hash_int(const void* key);
+static uint64_t hash_string(const void* key_str);
+static uint64_t hash_ptr(const void* key);
+/*****************************************/
 
-        hash ^= hash >> 30;
-        hash *= SPLITMIX_64_CONST_1;
-        hash ^= hash >> 27;
-        hash *= SPLITMIX_64_CONST_2;
-        hash ^= hash >> 31;
+/*** Destructors ***/
+static void key_destructor(void* key);
+static void value_destructor(void* value);
+static void entry_destructor(HashEntry* entry);
+/***********************************************/
 
-        return hash;
-}
-uint64_t hash_string(const void* key_str) {
-        uint64_t hash = FNV_64_OFFSET;
-        char* key = (char*)key_str;
+static bool key_compare(const void* key1, const void* key2, int key_type);
+/*** Resizing ***/
+static HashTableResult rehash_for_resize(HashTable* hash_table,
+                                         HashEntry** old_buckets,
+                                         size_t old_size);
+static void hash_table_resize(HashTable* hash_table);
+static void hash_table_downsize(HashTable* hash_table);
+/*************************************************/
 
-        while (*key) {
-                hash ^= (uint64_t)(unsigned char)(*key);
-                hash *= FNV_64_PRIME;
-                key++;
-        }
-        return hash;
-}
+static HashTableResult remove_kvp(HashTable* hash_table, void* key);
 
-uint64_t hash_ptr(const void* key) {
-        uintptr_t ptr_address = (uintptr_t)key;
-        const uintptr_t* ptr_ptr = &ptr_address;
-
-        return hash_int(ptr_ptr);
-}
 
 HashTable* hash_table_create(int key_type, int value_type) {
         HashTable* hash_table = malloc(sizeof(HashTable));
@@ -76,6 +70,37 @@ HashTable* hash_table_create(int key_type, int value_type) {
         }
 
         return hash_table;
+}
+
+static uint64_t hash_int(const void* key) {
+        uint64_t hash = *(uint64_t*)(uintptr_t)key;
+
+        hash ^= hash >> 30;
+        hash *= SPLITMIX_64_CONST_1;
+        hash ^= hash >> 27;
+        hash *= SPLITMIX_64_CONST_2;
+        hash ^= hash >> 31;
+
+        return hash;
+}
+
+static uint64_t hash_string(const void* key_str) {
+        uint64_t hash = FNV_64_OFFSET;
+        char* key = (char*)key_str;
+
+        while (*key) {
+                hash ^= (uint64_t)(unsigned char)(*key);
+                hash *= FNV_64_PRIME;
+                key++;
+        }
+        return hash;
+}
+
+static uint64_t hash_ptr(const void* key) {
+        uintptr_t ptr_address = (uintptr_t)key;
+        const uintptr_t* ptr_ptr = &ptr_address;
+
+        return hash_int(ptr_ptr);
 }
 
 HashTableResult hash_table_put(HashTable* hash_table, void* key, void* value) {
@@ -153,39 +178,51 @@ void* hash_table_get(HashTable* hash_table, void* key) {
         return NULL;
 }
 
-bool key_compare(const void* key1, const void* key2, int key_type) {
-        bool key_match;
-        key_match = false;
+HashTableResult hash_table_remove(HashTable* hash_table, void* key) {
+        HashTableResult result = remove_kvp(hash_table, key);
+        if (result == HT_OK) {
+                hash_table_downsize(hash_table);
+        }
+        return result;
+}
 
-        if (key_type == HASH_TYPE_INT) {
-                if (*(uint64_t*)key1 == *(uint64_t*)key2) {
-                        key_match = true;
+static HashTableResult remove_kvp(HashTable* hash_table, void* key) {
+        uint64_t hash_value = hash_table->hash_func(key);
+        uint64_t hash_idx = hash_value % hash_table->size;
+        HashEntry* target = hash_table->buckets[hash_idx];
+
+        if (target == NULL) {
+                return HT_ERR_KEY_NOT_FOUND;
+        }
+
+        if (key_compare(target->key, key, hash_table->hash_key_type)) {
+                hash_table->buckets[hash_idx] = target->next;
+                entry_destructor(target);
+                if (hash_table->buckets[hash_idx] == NULL) {
+                        hash_table->used_bucket_count--;
                 }
+                return HT_OK;
         }
-        if (key_type == HASH_TYPE_STRING) {
-                if (strcmp((char*)key1, (char*)key2) == 0) {
-                        key_match = true;
+
+        HashEntry* previous = target;
+        target = target->next;
+        while (target != NULL) {
+                if (key_compare(key, target->key, hash_table->hash_key_type)) {
+                        HashEntry* next_node = target->next;
+                        entry_destructor(target);
+                        previous->next = next_node;
+                        return HT_OK;
                 }
+                previous = target;
+                target = previous->next;
         }
-        return key_match;
+
+        return HT_ERR_KEY_NOT_FOUND;
 }
 
-void key_destructor(void* key) {
-        if (key == NULL) {
-                return;
-        }
-        free(key);
-}
-
-void value_destructor(void* value) {
-        if (value == NULL) {
-                return;
-        }
-        free(value);
-}
-
-HashTableResult rehash_for_resize(HashTable* hash_table,
-                                  HashEntry** old_buckets, size_t old_size) {
+static HashTableResult rehash_for_resize(HashTable* hash_table,
+                                         HashEntry** old_buckets,
+                                         size_t old_size) {
         size_t bucket_counter = 0;
         HashEntry** new_buckets = calloc(hash_table->size, sizeof(HashEntry*));
         if (new_buckets == NULL) {
@@ -201,7 +238,7 @@ HashTableResult rehash_for_resize(HashTable* hash_table,
                         HashEntry* prev_entry = entry;
                         entry = entry->next;
                         // this is a potential issue
-                        // need to look at transactional rollback 
+                        // need to look at transactional rollback
                         // if put call fails
                         if (put_result == HT_OK) {
                                 free(prev_entry);
@@ -212,7 +249,11 @@ HashTableResult rehash_for_resize(HashTable* hash_table,
         return HT_OK;
 }
 
-void hash_table_resize(HashTable* hash_table) {
+void hash_table_resize_test(HashTable* hash_table) {
+    hash_table_resize(hash_table);
+}
+
+static void hash_table_resize(HashTable* hash_table) {
         if (hash_table->is_downsizing) {
                 return;
         }
@@ -232,7 +273,7 @@ void hash_table_resize(HashTable* hash_table) {
         free(old_buckets);
 }
 
-void hash_table_downsize(HashTable* hash_table) {
+static void hash_table_downsize(HashTable* hash_table) {
         // don't bother running if we've only ever done 1 resize.
         if (hash_table->size < TABLE_SIZE * TABLE_SIZE_SCALE_FACTOR) {
                 return;
@@ -246,12 +287,15 @@ void hash_table_downsize(HashTable* hash_table) {
                 (float)hash_table->size) {
                 hash_table->is_downsizing = true;
                 size_t old_size = hash_table->size;
+                size_t old_bucket_count = hash_table->used_bucket_count;
+
                 HashEntry** old_buckets = hash_table->buckets;
                 hash_table->size = hash_table->size / TABLE_SIZE_SCALE_FACTOR;
-                size_t old_bucket_count = hash_table->used_bucket_count;
                 hash_table->used_bucket_count = 0;
+
                 HashTableResult rehash_result =
                     rehash_for_resize(hash_table, old_buckets, old_size);
+
                 if (rehash_result != HT_OK) {
                         hash_table->used_bucket_count = old_bucket_count;
                         hash_table->is_downsizing = false;
@@ -259,54 +303,49 @@ void hash_table_downsize(HashTable* hash_table) {
                 }
                 free(old_buckets);
         }
+
         hash_table->is_downsizing = false;
 }
 
-HashTableResult hash_table_remove(HashTable* hash_table, void* key) {
-    HashTableResult result = remove_kvp(hash_table, key);
-    if (result == HT_OK) {
-        hash_table_downsize(hash_table);
-    }
-    return result;
+
+
+static bool key_compare(const void* key1, const void* key2, int key_type) {
+        bool key_match;
+        key_match = false;
+
+        if (key_type == HASH_TYPE_INT) {
+                if (*(uint64_t*)key1 == *(uint64_t*)key2) {
+                        key_match = true;
+                }
+        }
+        if (key_type == HASH_TYPE_STRING) {
+                if (strcmp((char*)key1, (char*)key2) == 0) {
+                        key_match = true;
+                }
+        }
+        return key_match;
 }
 
-HashTableResult remove_kvp(HashTable* hash_table, void* key) {
-        uint64_t hash_value = hash_table->hash_func(key);
-        uint64_t hash_idx = hash_value % hash_table->size;
-        HashEntry* target = hash_table->buckets[hash_idx];
-
-        if (target == NULL) {
-                return HT_ERR_KEY_NOT_FOUND;
+static void key_destructor(void* key) {
+        if (key == NULL) {
+                return;
         }
-
-        if (key_compare(target->key, key, hash_table->hash_key_type)) {
-                hash_table->buckets[hash_idx] = target->next;
-                key_destructor(target->key);
-                value_destructor(target->value);
-                free(target);
-                if (hash_table->buckets[hash_idx] == NULL) {
-                        hash_table->used_bucket_count--;
-                }
-                return HT_OK;
-        }
-
-        HashEntry* previous = target;
-        target = target->next;
-        while (target != NULL) {
-                if (key_compare(key, target->key, hash_table->hash_key_type)) {
-                        HashEntry* next_node = target->next;
-                        key_destructor(target->key);
-                        value_destructor(target->value);
-                        free(target);
-                        previous->next = next_node;
-                        return HT_OK;
-                }
-                previous = target;
-                target = previous->next;
-        }
-
-        return HT_ERR_KEY_NOT_FOUND;
+        free(key);
 }
+
+static void value_destructor(void* value) {
+        if (value == NULL) {
+                return;
+        }
+        free(value);
+}
+
+static void entry_destructor(HashEntry* entry) {
+        key_destructor(entry->key);
+        value_destructor(entry->value);
+        free(entry);
+}
+
 
 void hash_table_destroy(HashTable* hash_table) {
         for (size_t bucket_counter = 0; bucket_counter < hash_table->size;
@@ -314,9 +353,7 @@ void hash_table_destroy(HashTable* hash_table) {
                 HashEntry* bucket_entry = hash_table->buckets[bucket_counter];
                 while (bucket_entry != NULL) {
                         HashEntry* next_entry = bucket_entry->next;
-                        key_destructor(bucket_entry->key);
-                        value_destructor(bucket_entry->value);
-                        free(bucket_entry);
+                        entry_destructor(bucket_entry);
                         bucket_entry = next_entry;
                 }
         }

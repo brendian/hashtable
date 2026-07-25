@@ -47,33 +47,11 @@ typedef enum {
         HT_ERR_INVALID_TYPE,
 } HashTableResult;
 
-uint64_t hash_int(const void* key);
-uint64_t hash_string(const void* key_str);
-uint64_t hash_ptr(const void* key_ptr);
-
-bool key_compare(const void* key1, const void* key2, int key_type);
-void key_destructor(void* key);
-void value_destructor(void* value);
-
-// Returns pointer to the newly created hash_table instance.
-// key_type and value_type must be valid hashtable types,
-// as defined above. Invalid values will return NULL to the caller;
 HashTable* hash_table_create(int key_type, int value_type);
-
 HashTableResult hash_table_put(HashTable* hash_table, void* key, void* value);
 void* hash_table_get(HashTable* hash_table, void* key);
-bool key_value_compare(HashEntry* hash_entry, void* key, void* value,
-                      int key_type, int value_type);
-
 HashTableResult hash_table_remove(HashTable* hash_table, void* key);
-HashTableResult remove_kvp(HashTable* hash_table, void* key);
-HashTableResult rehash_for_resize(HashTable* hash_table, HashEntry** old_buckets,
-                       size_t old_size);
-void hash_table_resize(HashTable* hash_table);
-void hash_table_downsize(HashTable* hash_table);
+
 void hash_table_destroy(HashTable* hash_table);
-// removes an item from the hash table.
-// if the value attempting to remove doesnt exist (NULL), return 0.
-// if it does exist and was successfully removed, return 1;
-// all other results (likely errors) return -1.
 void ht_print(HashTable* hash_table);
+void hash_table_resize_test(HashTable* hash_table);

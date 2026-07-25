@@ -26,7 +26,7 @@ int main() {
     printf("data added to hashtable\n");
     void* val1_hashed = hash_table_get(hash_table, (void*)name1);
     printf("Val1 retrieved: %s\n", (char*)val1_hashed);
-    hash_table_resize(hash_table);
+    hash_table_resize_test(hash_table);
     printf("Resized.\n");
     void* val2_hashed_resized = hash_table_get(hash_table, (void*)name1);
     printf("Val2 retrieved: %s\n", (char*)val2_hashed_resized);
