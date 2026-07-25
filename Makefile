@@ -4,12 +4,12 @@ ASANFLAGS = -fsanitize=address,undefined
 
 all: app test
 
-app: main.c hashtable.c
-	$(CC) $(CFLAGS) $(ASANFLAGS) -o hashtable main.c hashtable.c
+app: src/main.c src/hashtable.c
+	$(CC) $(CFLAGS) $(ASANFLAGS) -o bin/hashtable src/main.c src/hashtable.c
 
-test: test_main.c hashtable.c unity.c
-	$(CC) $(CFLAGS) $(ASANFLAGS) -o tests test_main.c hashtable.c unity.c
-	./tests
+test: tests/test_main.c src/hashtable.c src/unity.c
+	$(CC) $(CFLAGS) $(ASANFLAGS) -o bin/tests tests/test_main.c src/hashtable.c src/unity.c
+	./bin/tests
 
 clean:
 	rm -f hashtable tests
