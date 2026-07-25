@@ -15,6 +15,16 @@ static void entry_destructor(HashEntry* entry);
 /***********************************************/
 
 static bool key_compare(const void* key1, const void* key2, int key_type);
+static bool compare_key_and_count_collisions(HashEntry* existing_hash_entry,
+                                             void* key, void* value,
+                                             HashTable* hash_table,
+                                             bool* is_value_replaced,
+                                             size_t* chain_collision_count,
+                                             bool* chain_collisions_exceed_max);
+static HashTableResult alloc_and_place_entry(HashTable* hash_table,
+                                             size_t bucket_idx,
+                                             bool bucket_was_empty, void* key,
+                                             void* value);
 /*** Resizing ***/
 static HashTableResult rehash_for_resize(HashTable* hash_table,
                                          HashEntry** old_buckets,
@@ -30,11 +40,20 @@ HashTable* hash_table_create(int key_type, int value_type) {
         if (!hash_table) {
                 return NULL;
         }
+        HashTableStats* hash_stats = malloc(sizeof(HashTableStats));
+        if (!hash_stats) {
+            return NULL;
+        }
 
+
+        hash_table->stats = hash_stats;
         hash_table->hash_key_type = key_type;
         hash_table->size = TABLE_SIZE;
-        hash_table->used_bucket_count = 0;
+        hash_table->stats->used_bucket_count = 0;
+        hash_table->stats->current_load = 0.0f;
+        hash_table->stats->total_entries = 0;
         hash_table->is_downsizing = false;
+        hash_table->TESTING_COLLISION_FLAG = false;
 
         switch (key_type) {
                 case HASH_TYPE_INT:
@@ -95,6 +114,15 @@ static uint64_t hash_string(const void* key_str) {
         return hash;
 }
 
+uint64_t test_hash_always_zero(const void *key) {
+    (void)key;
+    return 0;
+}
+
+uint64_t test_hash_func_string(void *key) {
+    return hash_string(key);
+}
+
 static uint64_t hash_ptr(const void* key) {
         uintptr_t ptr_address = (uintptr_t)key;
         const uintptr_t* ptr_ptr = &ptr_address;
@@ -102,7 +130,53 @@ static uint64_t hash_ptr(const void* key) {
         return hash_int(ptr_ptr);
 }
 
+static bool compare_key_and_count_collisions(
+    HashEntry* existing_hash_entry, void* key, void* value,
+    HashTable* hash_table, bool* is_value_replaced,
+    size_t* chain_collision_count, bool* chain_collisions_exceed_max) {
+        if (key_compare(existing_hash_entry->key, key,
+                        hash_table->hash_key_type)) {
+                value_destructor(existing_hash_entry->value);
+                existing_hash_entry->value = value;
+                *is_value_replaced = true;
+                return true;
+        }
+
+        *chain_collision_count = *chain_collision_count + 1;
+        existing_hash_entry = existing_hash_entry->next;
+        if (*chain_collision_count >= MAX_CHAIN_LENGTH) {
+                *chain_collisions_exceed_max = true;
+                return true;
+        }
+
+        return false;
+}
+
+static HashTableResult alloc_and_place_entry(HashTable* hash_table,
+                                             size_t bucket_idx,
+                                             bool bucket_was_empty, void* key,
+                                             void* value) {
+        HashEntry* hash_entry = malloc(sizeof(HashEntry));
+        if (!hash_entry) {
+                if (bucket_was_empty) {
+                        hash_table->stats->used_bucket_count--;
+                }
+                return HT_ERR_ALLOC_FAILED;
+        }
+        hash_entry->key = key;
+        hash_entry->value = value;
+        hash_entry->next = hash_table->buckets[bucket_idx];
+        hash_table->buckets[bucket_idx] = hash_entry;
+        hash_table->stats->total_entries++;
+
+        return HT_OK;
+}
+
 HashTableResult hash_table_put(HashTable* hash_table, void* key, void* value) {
+        if (key == NULL || value == NULL) {
+                return HT_ERR_INVALID_ARGUMENT;
+        }
+
         uint64_t hash_value = hash_table->hash_func(key);
         uint64_t bucket_idx = hash_value % hash_table->size;
 
@@ -110,44 +184,33 @@ HashTableResult hash_table_put(HashTable* hash_table, void* key, void* value) {
         bool bucket_was_empty = (existing_hash_entry == NULL);
         bool is_value_replaced = false, chain_collisions_exceed_max = false;
         size_t chain_collision_count = 0;
+
         if (bucket_was_empty) {
-                hash_table->used_bucket_count++;
+                hash_table->stats->used_bucket_count++;
         }
 
         while (existing_hash_entry != NULL) {
-                if (key_compare(existing_hash_entry->key, key,
-                                hash_table->hash_key_type)) {
-                        value_destructor(existing_hash_entry->value);
-                        existing_hash_entry->value = value;
-                        is_value_replaced = true;
-                        break;
-                }
-
-                chain_collision_count++;
-                existing_hash_entry = existing_hash_entry->next;
-                if (chain_collision_count >= MAX_CHAIN_LENGTH) {
-                        chain_collisions_exceed_max = true;
+                if (compare_key_and_count_collisions(
+                        existing_hash_entry, key, value, hash_table,
+                        &is_value_replaced, &chain_collision_count,
+                        &chain_collisions_exceed_max)) {
                         break;
                 }
         }
 
         if (!is_value_replaced) {
-                HashEntry* hash_entry = malloc(sizeof(HashEntry));
-                if (!hash_entry) {
-                        if (bucket_was_empty) {
-                                hash_table->used_bucket_count--;
-                        }
-                        return HT_ERR_ALLOC_FAILED;
+                HashTableResult entry_result = alloc_and_place_entry(hash_table, bucket_idx, bucket_was_empty, key, value);
+                if (entry_result != HT_OK) {
+                    return entry_result;
                 }
-                hash_entry->key = key;
-                hash_entry->value = value;
-                hash_entry->next = hash_table->buckets[bucket_idx];
-                hash_table->buckets[bucket_idx] = hash_entry;
         }
 
-        if ((float)hash_table->used_bucket_count / (float)hash_table->size >
+        if ((float)hash_table->stats->used_bucket_count / (float)hash_table->size >
                 HT_FILL_RATIO ||
             chain_collisions_exceed_max) {
+            if (hash_table->TESTING_COLLISION_FLAG) {
+                hash_table->hash_func = hash_string;
+            }
                 hash_table_resize(hash_table);
         }
 
@@ -185,12 +248,28 @@ HashTableResult hash_table_remove(HashTable* hash_table, void* key) {
         return result;
 }
 
+HashTableStats* get_statistics(HashTable* hash_table) {
+    if (hash_table) {
+        if (hash_table->stats) {
+            return hash_table->stats;
+        }
+    }
+    return NULL;
+}
+
+size_t get_total_size(HashTable *hash_table) {
+    if (hash_table) {
+        return hash_table->size;
+    }
+    return -1;
+}
+
 bool hash_table_key_exists(HashTable* hash_table, void* key) {
-       void* result = hash_table_get(hash_table, key); 
-       if (!result) {
-           return false;
-       }
-       return true;
+        void* result = hash_table_get(hash_table, key);
+        if (!result) {
+                return false;
+        }
+        return true;
 }
 
 static HashTableResult remove_kvp(HashTable* hash_table, void* key) {
@@ -206,7 +285,8 @@ static HashTableResult remove_kvp(HashTable* hash_table, void* key) {
                 hash_table->buckets[hash_idx] = target->next;
                 entry_destructor(target);
                 if (hash_table->buckets[hash_idx] == NULL) {
-                        hash_table->used_bucket_count--;
+                        hash_table->stats->used_bucket_count--;
+                        hash_table->stats->total_entries--;
                 }
                 return HT_OK;
         }
@@ -218,6 +298,7 @@ static HashTableResult remove_kvp(HashTable* hash_table, void* key) {
                         HashEntry* next_node = target->next;
                         entry_destructor(target);
                         previous->next = next_node;
+                        hash_table->stats->total_entries--;
                         return HT_OK;
                 }
                 previous = target;
@@ -225,6 +306,14 @@ static HashTableResult remove_kvp(HashTable* hash_table, void* key) {
         }
 
         return HT_ERR_KEY_NOT_FOUND;
+}
+
+void test_rehash(HashTable *hash_table) {
+    HashEntry** old_buckets = hash_table->buckets;
+    size_t old_size = TABLE_SIZE;
+    HashTableResult result = rehash_for_resize(hash_table, old_buckets, old_size);
+    (void)result;
+    free(old_buckets);
 }
 
 static HashTableResult rehash_for_resize(HashTable* hash_table,
@@ -267,13 +356,13 @@ static void hash_table_resize(HashTable* hash_table) {
         size_t old_size = hash_table->size;
         HashEntry** old_buckets = hash_table->buckets;
         hash_table->size = hash_table->size * TABLE_SIZE_SCALE_FACTOR;
-        size_t old_bucket_count = hash_table->used_bucket_count;
-        hash_table->used_bucket_count = 0;
+        size_t old_bucket_count = hash_table->stats->used_bucket_count;
+        hash_table->stats->used_bucket_count = 0;
         HashTableResult rehash_result =
             rehash_for_resize(hash_table, old_buckets, old_size);
 
         if (rehash_result != HT_OK) {
-                hash_table->used_bucket_count = old_bucket_count;
+                hash_table->stats->used_bucket_count = old_bucket_count;
                 return;
         }
 
@@ -289,22 +378,22 @@ static void hash_table_downsize(HashTable* hash_table) {
         // this ratio should leave the result ratio at 45% usage
         // enough to grow and shrink sufficiently before resizing again in
         // either direction
-        if ((float)hash_table->used_bucket_count <
+        if ((float)hash_table->stats->used_bucket_count <
             (TARGET_DOWNSIZE_RATIO / TABLE_SIZE_SCALE_FACTOR) *
                 (float)hash_table->size) {
                 hash_table->is_downsizing = true;
                 size_t old_size = hash_table->size;
-                size_t old_bucket_count = hash_table->used_bucket_count;
+                size_t old_bucket_count = hash_table->stats->used_bucket_count;
 
                 HashEntry** old_buckets = hash_table->buckets;
                 hash_table->size = hash_table->size / TABLE_SIZE_SCALE_FACTOR;
-                hash_table->used_bucket_count = 0;
+                hash_table->stats->used_bucket_count = 0;
 
                 HashTableResult rehash_result =
                     rehash_for_resize(hash_table, old_buckets, old_size);
 
                 if (rehash_result != HT_OK) {
-                        hash_table->used_bucket_count = old_bucket_count;
+                        hash_table->stats->used_bucket_count = old_bucket_count;
                         hash_table->is_downsizing = false;
                         return;
                 }
@@ -362,6 +451,7 @@ void hash_table_destroy(HashTable* hash_table) {
                 }
         }
         free(hash_table->buckets);
+        free(hash_table->stats);
         // bye bye
         free(hash_table);
 }

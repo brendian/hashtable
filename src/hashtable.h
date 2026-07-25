@@ -26,13 +26,20 @@ typedef struct HashEntry {
         struct HashEntry* next;
 } HashEntry;
 
+typedef struct HashTableStats {
+        size_t used_bucket_count;
+        size_t total_entries;
+        float current_load;
+} HashTableStats;
+
 typedef struct HashTable {
         HashEntry** buckets;
-        size_t used_bucket_count;
+        HashTableStats* stats;
         size_t size;
         int hash_key_type;
         int hash_value_type;
         bool is_downsizing;
+        bool TESTING_COLLISION_FLAG;
 
         uint64_t (*hash_func)(const void*);
         int (*key_compare)(const void* key1, const void* key2, int key_type);
@@ -45,6 +52,7 @@ typedef enum {
         HT_ERR_ALLOC_FAILED,
         HT_ERR_KEY_NOT_FOUND,
         HT_ERR_INVALID_TYPE,
+        HT_ERR_INVALID_ARGUMENT,
 } HashTableResult;
 
 HashTable* hash_table_create(int key_type, int value_type);
@@ -53,6 +61,12 @@ void* hash_table_get(HashTable* hash_table, void* key);
 HashTableResult hash_table_remove(HashTable* hash_table, void* key);
 bool hash_table_key_exists(HashTable* hash_table, void* key);
 
+HashTableStats* get_statistics(HashTable* hash_table);
+size_t get_total_size(HashTable* hash_table);
+
 void hash_table_destroy(HashTable* hash_table);
 void ht_print(HashTable* hash_table);
 void hash_table_resize_test(HashTable* hash_table);
+uint64_t test_hash_func_string(void* key);
+uint64_t test_hash_always_zero(const void* key);
+void test_rehash(HashTable* hash_table);
